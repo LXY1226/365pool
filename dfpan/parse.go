@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	"github.com/lxy1226/365pool/types"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -27,7 +28,7 @@ var inited = false
 "85c18a624204",
 }*/
 
-func Parse(id []byte) *http.Request {
+func Parse(id []byte) ([]*http.Request, error) {
 	if !inited {
 		resp, err := http.Get("http://page2.dfpan.com/downloader/webip.jsp")
 		if err != nil {
@@ -43,8 +44,10 @@ func Parse(id []byte) *http.Request {
 			md5w.Write([]byte("7c9d535eb56d2690dc09b760574c9a4dkieliOAwii*&^543uy(t<bvfe?PQZW"))
 			md5w.Write(word.Bytes())
 			word.Reset()
+			word.Grow(32)
 			word.WriteString(hex.EncodeToString(md5w.Sum(nil)))
 			var doword bytes.Buffer
+			doword.Grow(12)
 			doword.Write(word.Bytes()[0:7])
 			doword.WriteString(strconv.FormatInt(int64(i), 10))
 			doword.Write(word.Bytes()[8:12])
@@ -79,9 +82,13 @@ func Parse(id []byte) *http.Request {
 	response, _ := client.Do(request)
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
+	if len(bytes.Split(body, []byte("downUrl:"))) != 2 {
+		return nil, &types.MyError{string(body)}
+	}
 	downUrl := bytes.Split(body, []byte("downUrl:"))[1]
 	request, err = http.NewRequest("GET", string(downUrl), nil)
 	request.Header.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0) membership/2 YunDown/2.9.4")
 	request.Header.Add("Referer", "http://page2.dfpan.com/fs/"+string(id)+"/")
-	return request
+	requests := []*http.Request{request}
+	return requests, nil
 }
