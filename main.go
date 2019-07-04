@@ -13,10 +13,11 @@ import (
 	"sync/atomic"
 	"time"
 )
-
+// uint8 up to 256
 const (
 	downloadItems   = 3
 	downloadThreads = 8
+	retryTimes      = 10
 )
 
 func main() {
@@ -28,6 +29,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}*/
+	refreshChan := make(chan uint8)
 	reqs, err := dfpan.Parse([]byte("5adcczb414b67"))
 	if err != nil {
 		//Error
@@ -66,10 +68,10 @@ func ask_conf() int {
 
 func download(r []*http.Request, dir string, filename string) error {
 	speeds := [downloadThreads]uint32{}
-	refresh_chan := make(chan uint8)
+	refreshChan := make(chan uint8)
 	var size int64
 	var reqs []*http.Request
-	client := http.DefaultClient
+	client := &http.Client{}
 	client.Timeout = 10
 	for i := 0; i < len(r); i++ {
 		req := *r[i]
@@ -100,23 +102,27 @@ func download(r []*http.Request, dir string, filename string) error {
 	return nil
 }
 
-func goDownload(basereq *http.Request, start uint64, size uint64, fIo *bufio.Writer) {
+func goDownload(id int, refreshChan chan uint8, basereq *http.Request, pos uint64, size uint64, fIo *bufio.Writer) {
 	req := *basereq
 	//https://gocn.vip/question/666
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", start, start+size))
 	//https://blog.csdn.net/a99361481/article/details/81751231
-	client := http.DefaultClient
+	client := &http.Client{}
 	client.Timeout = 10 * time.Second
-	resp, err := client.Do(&req)
+	resp, _ := client.Do(req)
 	completed := false
-	for completed {
+	for !completed {
 		if err != nil {
-			log.Fatal(err)
+			for i := 0, i < retryTimes, i++ {
+				fmt.println("Download Error: ")
+			}
+			
 		}
+		atsomic.StoreUint32(speed, 3)
 	}
-
+	i -> refresh_chan
 }
 
 func add_speed(speed *uint32) {
-	atomic.StoreUint32(speed, 3)
+	
 }
