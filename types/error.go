@@ -1,9 +1,9 @@
 package types
 
 type MyError struct {
-	errMsg string
+	ErrMsg string
 }
 
 func (e *MyError) Error() string {
-	return e.errMsg
+	return e.ErrMsg
 }

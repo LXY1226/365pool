@@ -4,42 +4,37 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/lxy1226/365pool/dfpan"
-	"github.com/lxy1226/365pool/types"
-	"log"
+	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
-// uint8 up to 256
+
+// uint up to 256
 const (
 	downloadItems   = 3
 	downloadThreads = 8
 	retryTimes      = 10
+	pieceSize       = 320 * 1024
 )
 
 func main() {
 	/*fin, err := os.OpenFile("test.bin", os.O_CREATE|os.O_WRONLY, os.ModeType)
-	if err != nil {
-		panic(err)
-	}
-	err = fin.Truncate(1048576 * 1024)
-	if err != nil {
-		panic(err)
-	}*/
-	refreshChan := make(chan uint8)
+	 */
+	refreshChan := make(chan uint)
 	reqs, err := dfpan.Parse([]byte("5adcczb414b67"))
 	if err != nil {
 		//Error
 		fmt.Println("Parse Error: ", err)
 	} else {
-		err := download(reqs, "D:/Download/", "")
-		if err != nil {
-			fmt.Println("Download Error: ", err)
-		}
+		go download(refreshChan, reqs, "D:/Download/", "")
 	}
+	time.Sleep(2 ^ 10*time.Hour)
 }
 
 func read_conf() {
@@ -50,10 +45,10 @@ func read_conf() {
 	}
 	defer func() { _ = f.Close() }()
 }
-func bytesToSize(length uint32) string {
+func bytesToSize(length uint64) string {
 	// https://blog.csdn.net/a99361481/article/details/81751231
 	var k = 1024 // or 1024
-	var sizes = []string{" B", "KB", "MB", "GB", "TB"}
+	var sizes = []string{" B", "KB", "MB", "GB"}
 	if length == 0 {
 		return "0 B"
 	}
@@ -66,63 +61,137 @@ func ask_conf() int {
 	return 0
 }
 
-func download(r []*http.Request, dir string, filename string) error {
-	speeds := [downloadThreads]uint32{}
-	refreshChan := make(chan uint8)
-	var size int64
+func download(taskrefreshChan chan uint, r []*http.Request, dir string, filename string) {
+	var poss [downloadThreads]uint64
+	refreshChan := make(chan uint)
+	var size uint64
 	var reqs []*http.Request
 	client := &http.Client{}
-	client.Timeout = 10
+	client.Timeout = 10 * time.Second
 	for i := 0; i < len(r); i++ {
 		req := *r[i]
 		req.Method = "HEAD"
-		resp, err := client.Do(*req)
+		resp, err := client.Do(&req)
 		if err == nil {
-			nsize, _ = strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+			asize, _ := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+			nsize := uint64(asize)
 			if size == 0 {
 				size = nsize
 			} else if size != nsize {
-				return &types.MyError{"Requests Size not match"}
+				fmt.Println("Incorrect Requests")
+			}
+			if filename == "" {
+				filename = resp.Header.Get("Content-Disposition")
+				filename = strings.Split(filename, "filename=")[1]
+				println(filename)
 			}
 			reqs = append(reqs, r[i])
 		}
 	}
-
-	for i := 0; i < downloadThreads; i++ {
-		start = 0
-		go goDownload()
+	if reqs == nil {
+		fmt.Println("No Usable URL")
+		taskrefreshChan <- 1
+		return
 	}
-	select {
-	case /*i := */ <-refresh_chan:
-
-	}
-	go add_speed(&speeds[0])
-	time.Sleep(1 * time.Second)
-	fmt.Println(speeds)
-	return nil
-}
-
-func goDownload(id int, refreshChan chan uint8, basereq *http.Request, pos uint64, size uint64, fIo *bufio.Writer) {
-	req := *basereq
-	//https://gocn.vip/question/666
-	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", start, start+size))
-	//https://blog.csdn.net/a99361481/article/details/81751231
-	client := &http.Client{}
-	client.Timeout = 10 * time.Second
-	resp, _ := client.Do(req)
-	completed := false
-	for !completed {
-		if err != nil {
-			for i := 0, i < retryTimes, i++ {
-				fmt.println("Download Error: ")
+	var ranges [downloadThreads][2]uint64
+	if size != 0 {
+		var blockCount, threadCount, blocksextra, pos uint64
+		blockCount = uint64(size / pieceSize)
+		threadCount = uint64(blockCount / downloadThreads)
+		blocksextra = blockCount % downloadThreads
+		for i := 0; i < downloadThreads-1; i++ {
+			ranges[i][0] = pos
+			poss[i] = pos
+			pos += threadCount * pieceSize
+			if blocksextra > 0 {
+				pos += pieceSize
+				blocksextra--
 			}
-			
+			ranges[i][1] = pos
 		}
-		atsomic.StoreUint32(speed, 3)
+		ranges[downloadThreads-1][0] = pos
+		ranges[downloadThreads-1][1] = size
+	} else {
+		fmt.Println("Download for 0B?")
+		taskrefreshChan <- 1
+		return
 	}
-	i -> refresh_chan
+	f, err := os.Create(dir + filename)
+	if err != nil {
+		panic(err)
+	}
+	err = f.Truncate(int64(size))
+	if err != nil {
+		panic(err)
+	}
+	for id := uint(0); id < downloadThreads; id++ {
+		req := reqs[int(rand.Float32()*float32(len(reqs)))]
+		go goDownload(id, refreshChan, req, &ranges[id][0], &ranges[id][1], f)
+	}
+	ticker := time.NewTicker(1 * time.Second)
+	for {
+		select {
+		case /*id :=*/ <-refreshChan:
+			//TODO Add Dynamic Part Alloc
+			println("go exited")
+		case <-ticker.C:
+			var speed uint64
+			for id := 0; id < downloadThreads; id++ {
+				speed += ranges[id][0] - poss[id]
+				poss[id] = ranges[id][0]
+			}
+			print("\r" + bytesToSize(speed))
+		}
+
+	}
+
 }
 
-func add_speed(speed *uint32) {
-	
+func goDownload(id uint, refreshChan chan uint, basereq *http.Request, pos *uint64, end *uint64, f *os.File) {
+	fmt.Printf("Started %s-%s\n", bytesToSize(*pos), bytesToSize(*end))
+	client := &http.Client{}
+	client.Timeout = 60 * time.Second
+	for {
+		for i := 0; i < retryTimes+1; i++ {
+			req := *basereq
+			req.Method = "GET"
+			req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", *pos, *end))
+			resp, err := client.Do(&req)
+			raw := resp.Body
+			defer raw.Close()
+			reader := bufio.NewReaderSize(raw, pieceSize)
+			buff := make([]byte, pieceSize)
+			for {
+				nr, er := reader.Read(buff)
+				if nr > 0 {
+					nw, ew := f.WriteAt(buff[0:nr], int64(*pos))
+					if nw > 0 {
+						atomic.StoreUint64(pos, *pos+uint64(nr))
+						if *pos >= *end {
+							refreshChan <- id
+							return
+						}
+					}
+					if ew != nil {
+						err = ew
+						break
+					}
+					if nr != nw {
+						err = io.ErrShortWrite
+						break
+					}
+				}
+				if er != nil {
+					if er != io.EOF {
+						err = er
+					}
+					break
+				}
+			}
+			if err != nil {
+				fmt.Println("Download Error: ", err)
+			}
+
+		}
+	}
 }
