@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strconv"
 )
 
@@ -18,7 +19,7 @@ import (
 var dowords = [9][]byte{}
 var inited = false
 
-func Parse(id []byte) ([]*http.Request, error) {
+func Parse(id []byte) ([]http.Request, error) {
 	if !inited {
 		resp, err := http.Get("http://page2.dfpan.com/downloader/webip.jsp")
 		if err != nil {
@@ -50,35 +51,31 @@ func Parse(id []byte) ([]*http.Request, error) {
 	md5w.Write([]byte("kieliOAwii*&^543uy(t<bvfe?PQZW"))
 	sum := md5w.Sum(nil)
 	ucode := hex.EncodeToString(sum[4:8])
-	var url bytes.Buffer
-	url.Write([]byte("http://page2.dfpan.com/view?module=downLoader&vr=2.9.4&fixufid="))
-	url.Write(id)
-	url.Write([]byte("&action=download&licence=7c9d535eb56d2690dc09b760574c9a4d&dowords="))
-	url.Write(dowords[int(rand.Float32()*float32(len(dowords)))])
-	url.Write([]byte("&ucode="))
-	url.WriteString(ucode)
-	url.Write([]byte("&mac=03000200-0400-0500-0006-000700080009"))
+	var tmpurl bytes.Buffer
+	tmpurl.Write([]byte("http://page2.dfpan.com/view?module=downLoader&vr=2.9.4&fixufid="))
+	tmpurl.Write(id)
+	tmpurl.Write([]byte("&action=download&licence=7c9d535eb56d2690dc09b760574c9a4d&dowords="))
+	tmpurl.Write(dowords[int(rand.Float32()*float32(len(dowords)))])
+	tmpurl.Write([]byte("&ucode="))
+	tmpurl.WriteString(ucode)
+	tmpurl.Write([]byte("&mac=03000200-0400-0500-0006-000700080009"))
 	client := &http.Client{}
-	request, err := http.NewRequest("GET", url.String(), nil)
+	request := http.Request{}
+	request.URL, _ = url.Parse(tmpurl.String())
+	request.Header = http.Header{}
 	request.Header.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0) membership/2 YunDown/2.9.4")
 	request.Header.Add("Referer", "http://page2.dfpan.com/fs/"+string(id))
-	request.Header.Add("Continue", "Continue")
-	request.Header.Add("Host", "page2.dfpan.com")
-	request.Header.Add("Accept", "text/html, image/gif, image/jpeg, *; q=.2, */*; q=.2")
-	request.Header.Add("Connection", "keep-alive")
-	if err != nil {
-		log.Panicln("Internal Error: dfpan.Parse", err)
-	}
-	response, _ := client.Do(request)
+	response, _ := client.Do(&request)
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
 	if len(bytes.Split(body, []byte("downUrl:"))) != 2 {
 		return nil, &types.MyError{string(body)}
 	}
+	if err != nil {
+		log.Panicln("Internal Error: dfpan.Parse", err)
+	}
 	downUrl := bytes.Split(body, []byte("downUrl:"))[1]
-	request, err = http.NewRequest("GET", string(downUrl), nil)
-	request.Header.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0) membership/2 YunDown/2.9.4")
-	request.Header.Add("Referer", "http://page2.dfpan.com/fs/"+string(id)+"/")
-	requests := []*http.Request{request}
+	request.URL, _ = url.Parse(string(downUrl))
+	requests := []http.Request{request}
 	return requests, nil
 }
