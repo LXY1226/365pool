@@ -24,8 +24,6 @@ const (
 )
 
 func main() {
-	/*fin, err := os.OpenFile("test.bin", os.O_CREATE|os.O_WRONLY, os.ModeType)
-	 */
 	refreshChan := make(chan uint)
 	reqs, err := dfpan.Parse([]byte("5adcczb414b67"))
 	if err != nil {
@@ -35,6 +33,7 @@ func main() {
 		go download(refreshChan, reqs, "D:/Download/", "")
 	}
 	time.Sleep(2 ^ 10*time.Hour)
+
 }
 
 func read_conf() {
@@ -142,9 +141,7 @@ func download(taskrefreshChan chan uint, r []*http.Request, dir string, filename
 			}
 			print("\r" + bytesToSize(speed))
 		}
-
 	}
-
 }
 
 func goDownload(id uint, refreshChan chan uint, basereq *http.Request, pos *uint64, end *uint64, f *os.File) {

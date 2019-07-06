@@ -18,16 +18,6 @@ import (
 var dowords = [9][]byte{}
 var inited = false
 
-/*{
-"0987c0e589ed",
-"0eebbff94611",
-"a2fadc73e4ea",
-"6f6c21a4065c",
-"48c028081dd8",
-"ae90f5f60751",
-"85c18a624204",
-}*/
-
 func Parse(id []byte) ([]*http.Request, error) {
 	if !inited {
 		resp, err := http.Get("http://page2.dfpan.com/downloader/webip.jsp")
