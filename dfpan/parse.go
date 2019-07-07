@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
-	"github.com/lxy1226/365pool/types"
+	"errors"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -19,7 +19,7 @@ import (
 var dowords = [9][]byte{}
 var inited = false
 
-func Parse(id []byte) ([]http.Request, error) {
+func Parse(id []byte) ([]*http.Request, error) {
 	if !inited {
 		resp, err := http.Get("http://page2.dfpan.com/downloader/webip.jsp")
 		if err != nil {
@@ -62,20 +62,21 @@ func Parse(id []byte) ([]http.Request, error) {
 	client := &http.Client{}
 	request := http.Request{}
 	request.URL, _ = url.Parse(tmpurl.String())
-	request.Header = http.Header{}
-	request.Header.Add("User-Agent", "Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0) membership/2 YunDown/2.9.4")
-	request.Header.Add("Referer", "http://page2.dfpan.com/fs/"+string(id))
+	request.Header = http.Header{
+		"User-Agent": {"Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0) membership/2 YunDown/2.9.4"},
+		"Referer":    {"http://page2.dfpan.com/fs/" + string(id)},
+	}
 	response, _ := client.Do(&request)
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
 	if len(bytes.Split(body, []byte("downUrl:"))) != 2 {
-		return nil, &types.MyError{string(body)}
+		return nil, errors.New(string(body))
 	}
 	if err != nil {
 		log.Panicln("Internal Error: dfpan.Parse", err)
 	}
 	downUrl := bytes.Split(body, []byte("downUrl:"))[1]
 	request.URL, _ = url.Parse(string(downUrl))
-	requests := []http.Request{request}
+	requests := []*http.Request{&request}
 	return requests, nil
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -60,17 +61,17 @@ func ask_conf() int {
 	return 0
 }
 
-func download(taskrefreshChan chan uint, r []http.Request, dir string, filename string) {
+func download(taskrefreshChan chan uint, r []*http.Request, dir string, filename string) {
 	var poss [downloadThreads]uint64
 	refreshChan := make(chan uint)
 	var size uint64
-	var reqs []http.Request
+	var reqs []*http.Request
 	client := http.Client{}
 	client.Timeout = 10 * time.Second
 	for i := 0; i < len(r); i++ {
 		req := r[i]
-		req.Method = "HEAD"
-		resp, err := client.Do(&req)
+		req.Method = http.MethodHead
+		resp, err := client.Do(req)
 		if err == nil {
 			asize, _ := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
 			nsize := uint64(asize)
@@ -86,6 +87,7 @@ func download(taskrefreshChan chan uint, r []http.Request, dir string, filename 
 			}
 			reqs = append(reqs, r[i])
 		}
+		req.Method = http.MethodGet
 	}
 	if reqs == nil {
 		fmt.Println("No Usable URL")
@@ -123,9 +125,10 @@ func download(taskrefreshChan chan uint, r []http.Request, dir string, filename 
 	if err != nil {
 		panic(err)
 	}
+	mux := new(sync.Mutex)
 	for id := uint(0); id < downloadThreads; id++ {
 		req := reqs[int(rand.Float32()*float32(len(reqs)))]
-		go goDownload(id, refreshChan, req, &ranges[id][0], &ranges[id][1], f)
+		go goDownload(id, refreshChan, req, mux, &ranges[id][0], &ranges[id][1], f)
 	}
 	ticker := time.NewTicker(1 * time.Second)
 	for {
@@ -144,13 +147,6 @@ func download(taskrefreshChan chan uint, r []http.Request, dir string, filename 
 	}
 }
 
-func CopyReq(req http.Request) *http.Request {
-	requestNew := new(http.Request)
-	*requestNew = req
-	fmt.Printf("%p %p", req, *requestNew)
-	return requestNew
-}
-
 /*
 func CopyReq(r *http.Request)  http.Request{
 	requestNew := http.Request{}
@@ -161,18 +157,17 @@ func CopyReq(r *http.Request)  http.Request{
 }
 */
 
-func goDownload(id uint, refreshChan chan uint, basereq http.Request, pos *uint64, end *uint64, f *os.File) {
-	fmt.Printf("[%d]Started %s-%s\n", id, bytesToSize(*pos), bytesToSize(*end))
+func goDownload(id uint, refreshChan chan uint, basereq *http.Request, mux *sync.Mutex, pos *uint64, end *uint64, f *os.File) {
+	//fmt.Printf("[%d]Started %s-%s\n", id, bytesToSize(*pos), bytesToSize(*end))
 	client := http.Client{}
 	for {
 		for i := 0; i < retryTimes+1; i++ {
 			//req := CopyReq(&basereq)
-			req := basereq
-			newreq := CopyReq(req)
-			newreq.Method = "GET"
-			newreq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", *pos, *end))
+			mux.Lock()
+			basereq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", *pos, *end))
 			//resp, err := client.Do(&req)
-			resp, err := client.Do(newreq)
+			resp, err := client.Do(basereq)
+			mux.Unlock()
 			raw := resp.Body
 			defer raw.Close()
 			reader := bufio.NewReaderSize(raw, pieceSize)
@@ -181,7 +176,7 @@ func goDownload(id uint, refreshChan chan uint, basereq http.Request, pos *uint6
 				nr, er := reader.Read(buff)
 				if nr > 0 {
 					nw, ew := f.WriteAt(buff[0:nr], int64(*pos))
-					fmt.Printf("[%d]WriteAt %d %X\n", id, *pos, buff[0:7])
+					//fmt.Printf("[%d]WriteAt %d %X\n", id, *pos, buff[0:7])
 					if nw > 0 {
 						atomic.StoreUint64(pos, *pos+uint64(nr))
 						if *pos >= *end {
