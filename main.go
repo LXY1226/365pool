@@ -4,70 +4,78 @@ import (
 	"bufio"
 	"fmt"
 	"github.com/lxy1226/365pool/dfpan"
-	"io"
-	"math"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 // uint up to 256
 const (
-	downloadItems   = 3
-	downloadThreads = 8
-	retryTimes      = 10
-	pieceSize       = 320 * 1024
+	downloadItems = 3
+	pararrel      = 8
+	retryTimes    = 10
+	splitSize     = 100 * 320 * 1024 //32MiB
+	buffSize      = 32 * 1024
 )
 
+type downTask struct {
+	id      *string
+	downReq *http.Request
+	start   uint64
+	size    *uint64
+	upURL   *url.URL
+}
+
+var client = http.Client{}
+
 func main() {
-	refreshChan := make(chan uint)
-	reqs, err := dfpan.Parse([]byte("5adcczb414b67"))
+	taskChan := make(chan *downTask)
+	id := "0fb1_12029127133196364"
+	go initDown(taskChan)
+	initOnedrive()
+	reqs, err := dfpan.Parse([]byte(id))
 	if err != nil {
 		//Error
 		fmt.Println("Parse Error: ", err)
 	} else {
-		go download(refreshChan, reqs, "D:/Download/", "")
+		download(&id, taskChan, reqs, "/Guomoo/")
 	}
 	time.Sleep(2 ^ 10*time.Hour)
-
 }
 
-func read_conf() {
-	f, err := os.Open("conf/global.conf")
-	if err != nil {
-		conf := ask_conf()
-		conf += 1
+func initDown(taskChan chan *downTask) {
+
+	var works [pararrel]*downTask
+	var refreshChan chan uint8
+	mux := new(sync.Mutex)
+	for id := uint8(0); id < pararrel; id++ {
+		works[id] = <-taskChan
+		go goTask(id, refreshChan, works[id], mux)
 	}
-	defer func() { _ = f.Close() }()
-}
-func bytesToSize(length uint64) string {
-	// https://blog.csdn.net/a99361481/article/details/81751231
-	var k = 1024 // or 1024
-	var sizes = []string{" B", "KB", "MB", "GB"}
-	if length == 0 {
-		return "0 B"
+	ok := true
+	for {
+		id := <-refreshChan
+		works[id], ok = <-taskChan
+		if !ok {
+			fmt.Println("Successfully Finished")
+			os.Exit(0)
+		}
+		go goTask(id, refreshChan, works[id], mux)
 	}
-	i := math.Floor(math.Log(float64(length)) / math.Log(float64(k)))
-	r := float64(length) / math.Pow(float64(k), i)
-	return strconv.FormatFloat(r, 'f', 3, 64) + " " + sizes[int(i)]
 }
 
-func ask_conf() int {
-	return 0
-}
-
-func download(taskrefreshChan chan uint, r []*http.Request, dir string, filename string) {
-	var poss [downloadThreads]uint64
-	refreshChan := make(chan uint)
-	var size uint64
+func download(id *string, taskChan chan *downTask, r []*http.Request, dir string) {
 	var reqs []*http.Request
 	client := http.Client{}
 	client.Timeout = 10 * time.Second
+	size := uint64(0)
+	var filename string
 	for i := 0; i < len(r); i++ {
 		req := r[i]
 		req.Method = http.MethodHead
@@ -80,130 +88,67 @@ func download(taskrefreshChan chan uint, r []*http.Request, dir string, filename
 			} else if size != nsize {
 				fmt.Println("Incorrect Requests")
 			}
-			if filename == "" {
-				filename = resp.Header.Get("Content-Disposition")
-				filename = strings.Split(filename, "filename=")[1]
-				println(filename)
-			}
+			filename = resp.Header.Get("Content-Disposition")
+			filename = strings.Split(filename, "filename=")[1]
+			println(filename)
 			reqs = append(reqs, r[i])
 		}
 		req.Method = http.MethodGet
 	}
 	if reqs == nil {
 		fmt.Println("No Usable URL")
-		taskrefreshChan <- 1
 		return
 	}
-	var ranges [downloadThreads][2]uint64
+	upURL := mkUploadRequest(dir + filename)
 	if size != 0 {
-		var blockCount, threadCount, blocksextra, pos uint64
-		blockCount = uint64(size / pieceSize)
-		threadCount = uint64(blockCount / downloadThreads)
-		blocksextra = blockCount % downloadThreads
-		for i := 0; i < downloadThreads-1; i++ {
-			ranges[i][0] = pos
-			poss[i] = pos
-			pos += threadCount * pieceSize
-			if blocksextra > 0 {
-				pos += pieceSize
-				blocksextra--
+		pos := uint64(0)
+		for pos = uint64(0); pos < size; pos += splitSize {
+			task := downTask{
+				id:      id,
+				downReq: reqs[int(rand.Float32()*float32(len(reqs)))],
+				start:   pos,
+				size:    &size,
+				upURL:   upURL,
 			}
-			ranges[i][1] = pos
+			taskChan <- &task
 		}
-		ranges[downloadThreads-1][0] = pos
-		ranges[downloadThreads-1][1] = size
 	} else {
 		fmt.Println("Download for 0B?")
-		taskrefreshChan <- 1
 		return
 	}
-	f, err := os.Create(dir + filename)
-	if err != nil {
-		panic(err)
-	}
-	err = f.Truncate(int64(size))
-	if err != nil {
-		panic(err)
-	}
-	mux := new(sync.Mutex)
-	for id := uint(0); id < downloadThreads; id++ {
-		req := reqs[int(rand.Float32()*float32(len(reqs)))]
-		go goDownload(id, refreshChan, req, mux, &ranges[id][0], &ranges[id][1], f)
-	}
-	ticker := time.NewTicker(1 * time.Second)
-	for {
-		select {
-		case /*id :=*/ <-refreshChan:
-			//TODO Add Dynamic Part Alloc
-			println("go exited")
-		case <-ticker.C:
-			var speed uint64
-			for id := 0; id < downloadThreads; id++ {
-				speed += ranges[id][0] - poss[id]
-				poss[id] = ranges[id][0]
-			}
-			print("\r" + bytesToSize(speed))
-		}
-	}
 }
 
-/*
-func CopyReq(r *http.Request)  http.Request{
-	requestNew := http.Request{}
-	requestNew.Header = r.Header
-	requestNew.URL = r.URL
-	requestNew.Method = r.Method
-	return requestNew
-}
-*/
-
-func goDownload(id uint, refreshChan chan uint, basereq *http.Request, mux *sync.Mutex, pos *uint64, end *uint64, f *os.File) {
-	//fmt.Printf("[%d]Started %s-%s\n", id, bytesToSize(*pos), bytesToSize(*end))
-	client := http.Client{}
+func goTask(id uint8, refreshChan chan uint8, task *downTask, mux *sync.Mutex) {
 	for {
 		for i := 0; i < retryTimes+1; i++ {
-			//req := CopyReq(&basereq)
+			end := task.start + splitSize - 1
+			if end > *task.size {
+				end = *task.size - 1
+			}
+			Logln(fmt.Sprintf("%d %s %d-%d/%d %d", id, *task.id, task.start, end, *task.size, end-task.start+1))
 			mux.Lock()
-			basereq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", *pos, *end))
-			//resp, err := client.Do(&req)
-			resp, err := client.Do(basereq)
+			task.downReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", task.start, end))
+			downResp, derr := client.Do(task.downReq)
 			mux.Unlock()
-			raw := resp.Body
-			defer raw.Close()
-			reader := bufio.NewReaderSize(raw, pieceSize)
-			buff := make([]byte, pieceSize)
-			for {
-				nr, er := reader.Read(buff)
-				if nr > 0 {
-					nw, ew := f.WriteAt(buff[0:nr], int64(*pos))
-					//fmt.Printf("[%d]WriteAt %d %X\n", id, *pos, buff[0:7])
-					if nw > 0 {
-						atomic.StoreUint64(pos, *pos+uint64(nr))
-						if *pos >= *end {
-							refreshChan <- id
-							return
-						}
-					}
-					if ew != nil {
-						err = ew
-						break
-					}
-					if nr != nw {
-						err = io.ErrShortWrite
-						break
-					}
-				}
-				if er != nil {
-					if er != io.EOF {
-						err = er
-					}
-					break
-				}
+			if derr != nil {
+				fmt.Println("Download Error: ", derr)
 			}
-			if err != nil {
-				fmt.Println("Download Error: ", err)
+			raw := downResp.Body
+			reader := bufio.NewReaderSize(raw, 32*1024*1024)
+			upReq := http.Request{
+				Method:        http.MethodPut,
+				URL:           task.upURL,
+				Header:        map[string][]string{"Content-Range": {fmt.Sprintf("bytes %d-%d/%d", task.start, end, task.size)}},
+				Body:          ioutil.NopCloser(reader),
+				ContentLength: int64(end - task.start + 1),
+				Host:          task.upURL.Host,
 			}
-
+			_, uerr := client.Do(&upReq)
+			if uerr != nil {
+				fmt.Println("Upload Error: ", uerr)
+			}
+			Logln(fmt.Sprintf("%d %s %d-%d/%d %d", id, *task.id, task.start, end, *task.size, end-task.start+1))
+			refreshChan <- id
 		}
 	}
 }

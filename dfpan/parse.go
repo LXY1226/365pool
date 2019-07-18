@@ -21,6 +21,7 @@ var inited = false
 
 func Parse(id []byte) ([]*http.Request, error) {
 	if !inited {
+		println("dfpan: Init IP")
 		resp, err := http.Get("http://page2.dfpan.com/downloader/webip.jsp")
 		if err != nil {
 			log.Fatalln("Get IP Error", err)
@@ -62,7 +63,7 @@ func Parse(id []byte) ([]*http.Request, error) {
 	client := &http.Client{}
 	request := http.Request{}
 	request.URL, _ = url.Parse(tmpurl.String())
-	request.Header = http.Header{
+	request.Header = map[string][]string{
 		"User-Agent": {"Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0) membership/2 YunDown/2.9.4"},
 		"Referer":    {"http://page2.dfpan.com/fs/" + string(id)},
 	}
