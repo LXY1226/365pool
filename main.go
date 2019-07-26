@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"github.com/lxy1226/365pool/dfpan"
 	"io/ioutil"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,25 +19,33 @@ import (
 
 // uint up to 256
 const (
-	downloadItems = 3
+	//downloadItems = 3
 	pararrel      = 8
 	retryTimes    = 10
-	splitSize     = 100 * 320 * 1024 //32MiB
+	splitSize     = 32 << 20 //32MiB
 	buffSize      = 32 * 1024
+	buffs         = 2
 )
 
-type downTask struct {
+type task struct {
 	id      *string
-	downReq *http.Request
+	downURL *downURL
 	start   uint64
 	size    *uint64
 	upURL   *url.URL
 }
 
+type downURL struct {
+	url url.URL
+	referer []byte
+}
+
+
 var client = http.Client{}
+var dnsResolver net.Resolver
 
 func main() {
-	taskChan := make(chan *downTask)
+	taskChan := make(chan *task)
 	id := "0fb1_12029127133196364"
 	go initDown(taskChan)
 	initOnedrive()
@@ -49,9 +59,9 @@ func main() {
 	time.Sleep(2 ^ 10*time.Hour)
 }
 
-func initDown(taskChan chan *downTask) {
+func initDown(taskChan chan *task) {
 
-	var works [pararrel]*downTask
+	var works [pararrel]*task
 	var refreshChan chan uint8
 	mux := new(sync.Mutex)
 	for id := uint8(0); id < pararrel; id++ {
@@ -70,7 +80,7 @@ func initDown(taskChan chan *downTask) {
 	}
 }
 
-func download(id *string, taskChan chan *downTask, r []*http.Request, dir string) {
+func download(id *string, taskChan chan *task, r []*http.Request, dir string) {
 	var reqs []*http.Request
 	client := http.Client{}
 	client.Timeout = 10 * time.Second
@@ -103,7 +113,7 @@ func download(id *string, taskChan chan *downTask, r []*http.Request, dir string
 	if size != 0 {
 		pos := uint64(0)
 		for pos = uint64(0); pos < size; pos += splitSize {
-			task := downTask{
+			task := task{
 				id:      id,
 				downReq: reqs[int(rand.Float32()*float32(len(reqs)))],
 				start:   pos,
@@ -118,21 +128,21 @@ func download(id *string, taskChan chan *downTask, r []*http.Request, dir string
 	}
 }
 
-func goTask(id uint8, refreshChan chan uint8, task *downTask, mux *sync.Mutex) {
+func goTask(id uint8, refreshChan chan uint8, task *task, mux *sync.Mutex) {
 	for {
-		for i := 0; i < retryTimes+1; i++ {
+		for i := 0; i < retryTimes + 1; i++ {
 			end := task.start + splitSize - 1
 			if end > *task.size {
 				end = *task.size - 1
 			}
 			Logln(fmt.Sprintf("%d %s %d-%d/%d %d", id, *task.id, task.start, end, *task.size, end-task.start+1))
-			mux.Lock()
-			task.downReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", task.start, end))
-			downResp, derr := client.Do(task.downReq)
-			mux.Unlock()
-			if derr != nil {
-				fmt.Println("Download Error: ", derr)
-			}
+			dHead := dHeadBuild(task.downURL, Sprintf("\rRange: bytes=%d-%d", task.start, end))
+			chanUpDown := make(chan int)
+			buff := [buffs][]byte
+			buff := make([]byte, buffSize)
+			go doDownload(task.downURL.url.Host, dHead, chanUpDown)
+			go doUpload()
+			if derr != nil { fmt.Println("Download Error: ", derr) }
 			raw := downResp.Body
 			reader := bufio.NewReaderSize(raw, 32*1024*1024)
 			upReq := http.Request{
@@ -151,4 +161,41 @@ func goTask(id uint8, refreshChan chan uint8, task *downTask, mux *sync.Mutex) {
 			refreshChan <- id
 		}
 	}
+}
+
+func doDownload(dHost string, dReqHead []byte, ch chan int, buff [buffs][]byte) {
+	dialer := net.Dialer{Resolver: &dnsResolver}
+	conn, err := dialer.Dial("tcp", dHost)
+	if err != nil {panic(err)}
+	_, err = conn.Write(dReqHead)
+	if err != nil {panic(err)}
+	for {
+		select {
+			case
+		}
+	}
+}
+
+func doUpload(uHost string, uReqHead []byte, ch chan int, buff [buffs][]byte) {
+	dialer := net.Dialer{Resolver: &dnsResolver}
+	conn, err := dialer.Dial("tcp", uHost)
+	if err != nil {panic(err)}
+	_, err = conn.Write(uReqHead)
+	if err != nil {panic(err)}
+}
+
+func dHeadBuild(dURL *downURL, dRange string) []byte{
+	var buff bytes.Buffer
+	buff.Grow(1024)
+	buff.Write([]byte("GET "))
+	buff.WriteString(dURL.url.Path)
+	buff.Write([]byte(" HTTP/1.1\rUser-Agent: Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0) membership/2 YunDown/2.9.4\rAccept: */*\rHost: "))
+	buff.WriteString(dURL.url.Host)
+	if dRange != ""{
+		buff.WriteString(dRange)
+	}
+	buff.Write([]byte("\rReferer: http://page2.dfpan.com/fs/"))
+	buff.Write(dURL.referer)
+	buff.Write([]byte("\rWant-Digest: SHA-512;q=1, SHA-256;q=1, SHA;q=0.1\r"))
+	return buff.Bytes()
 }

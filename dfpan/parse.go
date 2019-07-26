@@ -13,8 +13,12 @@ import (
 	"strconv"
 )
 
-//license_code = "7c9d535eb56d2690dc09b760574c9a4d" @43
-//mac          = "03000200-0400-0500-0006-000700080009" @47
+const (
+	//DO NOT CHANGE
+	line_40 = license_code + "kieliOAwii*&^543uy(t<bvfe?PQZW"
+	line_63 = "&action=download&licence=" + license_code + "&dowords="
+	line_67 = "&mac=" + mac
+)
 
 var dowords = [9][]byte{}
 var inited = false
@@ -33,7 +37,7 @@ func Parse(id []byte) ([]*http.Request, error) {
 		for i := 1; i < 10; i++ {
 			md5w := md5.New()
 			md5w.Write(ip)
-			md5w.Write([]byte("7c9d535eb56d2690dc09b760574c9a4dkieliOAwii*&^543uy(t<bvfe?PQZW"))
+			md5w.Write([]byte(line_40))
 			md5w.Write(word.Bytes())
 			word.Reset()
 			word.Grow(32)
@@ -55,11 +59,11 @@ func Parse(id []byte) ([]*http.Request, error) {
 	var tmpurl bytes.Buffer
 	tmpurl.Write([]byte("http://page2.dfpan.com/view?module=downLoader&vr=2.9.4&fixufid="))
 	tmpurl.Write(id)
-	tmpurl.Write([]byte("&action=download&licence=7c9d535eb56d2690dc09b760574c9a4d&dowords="))
+	tmpurl.Write([]byte(line_63))
 	tmpurl.Write(dowords[int(rand.Float32()*float32(len(dowords)))])
 	tmpurl.Write([]byte("&ucode="))
 	tmpurl.WriteString(ucode)
-	tmpurl.Write([]byte("&mac=03000200-0400-0500-0006-000700080009"))
+	tmpurl.Write([]byte(line_67))
 	client := &http.Client{}
 	request := http.Request{}
 	request.URL, _ = url.Parse(tmpurl.String())
