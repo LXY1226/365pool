@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"time"
 )
@@ -35,15 +36,42 @@ func (k kazybuf) Read(p []byte) (n int, err error) {
 			return len(p), nil
 		}
 	} else {
+		nextCursor -= buffSize
 		if k.wCursor > k.rCursor {
 			p = k.buf[k.rCursor : k.wCursor-1]
 			k.rCursor = k.wCursor
 			return k.wCursor - k.rCursor, nil
 		} else {
-
+			if nextCursor <= k.wCursor {
+				var buf bytes.Buffer
+				buf.Write(k.buf[k.rCursor:])
+				buf.Write(k.buf[0:nextCursor])
+				k.rCursor = nextCursor
+				p = buf.Bytes()
+				return len(p), nil
+			}
 		}
 	}
-	return
+	return 0, nil
+}
+
+func (k kazybuf) readloop() {
+	iBuff := make([]byte, buffSize / 4)
+	for {
+		n, err := k.rd.Read(iBuff)
+		if err != nil {
+			if err == io.EOF {
+				_ = k.Close()
+			}
+		}
+		// buff full
+		for k.wCursor == k.rCursor + 1 {
+			time.Sleep(250 * time.Millisecond)
+		}
+		if
+		spaceMore :=
+		k.rd.Read()
+	}
 }
 
 func (k kazybuf) Close() error {
@@ -58,5 +86,7 @@ func (k kazybuf) Close() error {
 func newkazybuf(rd io.ReadCloser) io.ReadCloser {
 	var buff kazybuf
 	buff.buf = make([]byte, buffSize)
-	return io.ReadCloser(buff)
+	buff.rd = rd
+	go buff.readloop()
+	return buff
 }
