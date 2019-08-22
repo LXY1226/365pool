@@ -2,12 +2,11 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
-	"github.com/lxy1226/365pool/dfpan"
+	"github.com/lxy1226/365pool/parser/dfpan"
+	"io"
 	"io/ioutil"
 	"math/rand"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,11 +19,9 @@ import (
 // uint up to 256
 const (
 	//downloadItems = 3
-	pararrel      = 8
-	retryTimes    = 10
-	splitSize     = 32 << 20 //32MiB
-	buffSize      = 32 * 1024
-	buffs         = 2
+	pararrel   = 128
+	retryTimes = 10
+	splitSize  = 32 << 20 //32MiB
 )
 
 type task struct {
@@ -36,31 +33,29 @@ type task struct {
 }
 
 type downURL struct {
-	url url.URL
+	url     url.URL
 	referer []byte
 }
 
-
 var client = http.Client{}
-var dnsResolver net.Resolver
 
 func main() {
-	taskChan := make(chan *task)
+	//taskChan := make(chan *task)
 	id := "0fb1_12029127133196364"
-	go initDown(taskChan)
+	//go initDown(taskChan)
 	initOnedrive()
-	reqs, err := dfpan.Parse([]byte(id))
+	//reqs, err := dfpan.Parse([]byte(id))
+	_, err := dfpan.Parse([]byte(id))
 	if err != nil {
 		//Error
 		fmt.Println("Parse Error: ", err)
 	} else {
-		download(&id, taskChan, reqs, "/Guomoo/")
+		//download(&id, taskChan, reqs, "/Guomoo/")
 	}
 	time.Sleep(2 ^ 10*time.Hour)
 }
 
 func initDown(taskChan chan *task) {
-
 	var works [pararrel]*task
 	var refreshChan chan uint8
 	mux := new(sync.Mutex)
@@ -130,30 +125,28 @@ func download(id *string, taskChan chan *task, r []*http.Request, dir string) {
 
 func goTask(id uint8, refreshChan chan uint8, task *task, mux *sync.Mutex) {
 	for {
-		for i := 0; i < retryTimes + 1; i++ {
+		for i := 0; i < retryTimes+1; i++ {
 			end := task.start + splitSize - 1
 			if end > *task.size {
 				end = *task.size - 1
 			}
 			Logln(fmt.Sprintf("%d %s %d-%d/%d %d", id, *task.id, task.start, end, *task.size, end-task.start+1))
-			dHead := dHeadBuild(task.downURL, Sprintf("\rRange: bytes=%d-%d", task.start, end))
-			chanUpDown := make(chan int)
-			buff := [buffs][]byte
-			buff := make([]byte, buffSize)
-			go doDownload(task.downURL.url.Host, dHead, chanUpDown)
-			go doUpload()
-			if derr != nil { fmt.Println("Download Error: ", derr) }
+			ioutil.ReadAll()
+
+			if derr != nil {
+				fmt.Println("Download Error: ", derr)
+			}
 			raw := downResp.Body
 			reader := bufio.NewReaderSize(raw, 32*1024*1024)
 			upReq := http.Request{
 				Method:        http.MethodPut,
 				URL:           task.upURL,
 				Header:        map[string][]string{"Content-Range": {fmt.Sprintf("bytes %d-%d/%d", task.start, end, task.size)}},
-				Body:          ioutil.NopCloser(reader),
+				Body:          newkazybuf(),
 				ContentLength: int64(end - task.start + 1),
 				Host:          task.upURL.Host,
 			}
-			_, uerr := client.Do(&upReq)
+			resp, uerr := client.Do(&upReq)
 			if uerr != nil {
 				fmt.Println("Upload Error: ", uerr)
 			}
@@ -161,41 +154,4 @@ func goTask(id uint8, refreshChan chan uint8, task *task, mux *sync.Mutex) {
 			refreshChan <- id
 		}
 	}
-}
-
-func doDownload(dHost string, dReqHead []byte, ch chan int, buff [buffs][]byte) {
-	dialer := net.Dialer{Resolver: &dnsResolver}
-	conn, err := dialer.Dial("tcp", dHost)
-	if err != nil {panic(err)}
-	_, err = conn.Write(dReqHead)
-	if err != nil {panic(err)}
-	for {
-		select {
-			case
-		}
-	}
-}
-
-func doUpload(uHost string, uReqHead []byte, ch chan int, buff [buffs][]byte) {
-	dialer := net.Dialer{Resolver: &dnsResolver}
-	conn, err := dialer.Dial("tcp", uHost)
-	if err != nil {panic(err)}
-	_, err = conn.Write(uReqHead)
-	if err != nil {panic(err)}
-}
-
-func dHeadBuild(dURL *downURL, dRange string) []byte{
-	var buff bytes.Buffer
-	buff.Grow(1024)
-	buff.Write([]byte("GET "))
-	buff.WriteString(dURL.url.Path)
-	buff.Write([]byte(" HTTP/1.1\rUser-Agent: Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0) membership/2 YunDown/2.9.4\rAccept: */*\rHost: "))
-	buff.WriteString(dURL.url.Host)
-	if dRange != ""{
-		buff.WriteString(dRange)
-	}
-	buff.Write([]byte("\rReferer: http://page2.dfpan.com/fs/"))
-	buff.Write(dURL.referer)
-	buff.Write([]byte("\rWant-Digest: SHA-512;q=1, SHA-256;q=1, SHA;q=0.1\r"))
-	return buff.Bytes()
 }

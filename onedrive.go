@@ -13,6 +13,9 @@ import (
 
 type passport string
 
+type oPassport struct {
+}
+
 const defpath = "https://guanghou-my.sharepoint.com/_api/v2.0"
 
 /*
