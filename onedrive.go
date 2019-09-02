@@ -30,7 +30,11 @@ const (
 	"redirect_uri":  "http://localhost:8000/callback",
 	"resource":      "https%3A%2F%2Fgitaccuacnz2-my.sharepoint.com%2F",
 )
-https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=c604ab67-5104-4aa0-accc-28c2e64b003d&scope=offline_access+files.readwrite.all&response_type=code&redirect_uri=http://localhost:8000/callback
+https://login.microsoftonline.com/common/oauth2/v2.0/authorize?
+client_id=c604ab67-5104-4aa0-accc-28c2e64b003d
+&scope=offline_access+files.readwrite.all
+&response_type=code
+&redirect_uri=http://localhost:8000/callback
 
 func login()
 */

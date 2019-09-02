@@ -131,8 +131,6 @@ func goTask(id uint8, refreshChan chan uint8, task *task, mux *sync.Mutex) {
 				end = *task.size - 1
 			}
 			Logln(fmt.Sprintf("%d %s %d-%d/%d %d", id, *task.id, task.start, end, *task.size, end-task.start+1))
-			ioutil.ReadAll()
-
 			if derr != nil {
 				fmt.Println("Download Error: ", derr)
 			}

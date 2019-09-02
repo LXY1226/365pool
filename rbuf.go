@@ -8,6 +8,12 @@ import (
 
 const buffSize = 1 << 20 //1MiB
 
+/*
+1.	----------------------------------
+	      ^w              ^r
+
+
+*/
 type kazybuf struct {
 	rd  io.ReadCloser
 	buf []byte
@@ -52,25 +58,33 @@ func (k kazybuf) Read(p []byte) (n int, err error) {
 			}
 		}
 	}
-	return 0, nil
+	return
 }
 
 func (k kazybuf) readloop() {
-	iBuff := make([]byte, buffSize / 4)
 	for {
+		iBuff := make([]byte, buffSize/4)
 		n, err := k.rd.Read(iBuff)
 		if err != nil {
 			if err == io.EOF {
 				_ = k.Close()
 			}
 		}
-		// buff full
-		for k.wCursor == k.rCursor + 1 {
+		// Wait For Usable Buffer
+		for k.wCursor == k.rCursor-1 {
 			time.Sleep(250 * time.Millisecond)
 		}
-		if
-		spaceMore :=
-		k.rd.Read()
+		i := 0
+		spaceMore := k.rCursor - k.wCursor - 1
+		if k.wCursor < k.rCursor {
+			i = k.rCursor - 1 - k.wCursor
+			if i > n {
+				i = n
+			}
+
+			spaceMore += buffSize
+		}
+
 	}
 }
 
@@ -79,8 +93,13 @@ func (k kazybuf) Close() error {
 		return io.EOF
 	}
 	k.isClosed = true
+	// Giving up unused data
 	k.buf = nil
 	return nil
+}
+
+func (k kazybuf) reInit() {
+
 }
 
 func newkazybuf(rd io.ReadCloser) io.ReadCloser {
