@@ -68,6 +68,8 @@ func (k kazybuf) readloop() {
 		if err != nil {
 			if err == io.EOF {
 				_ = k.Close()
+			} else {
+
 			}
 		}
 		// Wait For Usable Buffer

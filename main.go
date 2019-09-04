@@ -153,3 +153,20 @@ func goTask(id uint8, refreshChan chan uint8, task *task, mux *sync.Mutex) {
 		}
 	}
 }
+
+func copyReq(r http.Request) http.Request {
+	newReq := new(http.Request)
+	// Copy Header     cookies is included yes :)
+	newHeader := make(http.Header, len(r.Header))
+	for k, vv := range r.Header {
+		vv2 := make([]string, len(vv))
+		copy(vv2, vv)
+		newHeader[k] = vv2
+	}
+	newReq.Header = newHeader
+	// Link Things
+	newReq.URL = r.URL
+	newReq.Method = r.Method
+	newReq.Host = r.Host
+	return *newReq
+}
